@@ -6,7 +6,7 @@
  *  Modified: june 2015
  */
 
-//#define PERFORMANCE_ANALYSIS
+#define PERFORMANCE_ANALYSIS
 
 
 
@@ -19,7 +19,8 @@
 #include "./sorting/SortDeg6.hpp"
 #include "./sorting/SortDeg7.hpp"
 #include "./sorting/SortDeg8.hpp"
-
+#include "./sorting/SortDeg14.hpp"
+#include "./sorting/SortDeg15.hpp"
 
 
 inline bool the_compare_fx(const NODE & a, const NODE & b){return (a.value > b.value);}
@@ -80,6 +81,16 @@ private:
     long long int temps_3;
     long long int temps_4;
 
+    long long int count_tri1_deg6;
+    long long int count_tri2_deg6;
+    long long int count_tri1_deg7;
+    long long int count_tri2_deg7;
+
+    long long int time_tri1_deg6;
+    long long int time_tri2_deg6; 
+    long long int time_tri1_deg7;
+    long long int time_tri2_deg7; 
+
     __m256 invTab  [8];
     __m256 iClipTab[8];
     __m256 minusOne[8];
@@ -95,6 +106,16 @@ public:
         temps_2   = 0;
         temps_3   = 0;
         temps_4   = 0;
+
+        count_tri1_deg6 = 0;
+        count_tri2_deg6 = 0;
+        count_tri1_deg7 = 0;
+        count_tri2_deg7 = 0;
+
+        time_tri1_deg6 = 0;
+        time_tri2_deg6 = 0;
+        time_tri1_deg7 = 0;
+        time_tri2_deg7 = 0;
 
         minusOne[0] =  _mm256_set_ps (+0.0f, +0.0f, +0.0f, +0.0f, +0.0f, +0.0f, +0.0f, -1.0f);
         minusOne[1] =  _mm256_set_ps (+0.0f, +0.0f, +0.0f, +0.0f, +0.0f, +0.0f, -1.0f, -1.0f);
@@ -131,10 +152,25 @@ public:
         counter_2 ++;
         counter_3 ++;
         counter_4 ++;
+    long long int s_counter= counter_1 + counter_2 + counter_3 + counter_4;
+        count_tri1_deg6 ++;
+        count_tri2_deg6 ++;
+        count_tri1_deg7 ++;
+        count_tri2_deg7 ++;
+
+	printf("(PP) Counter tri1_deg6 value = %12ld, time %12ld (%ld)\n", count_tri1_deg6, time_tri1_deg6, time_tri1_deg6/count_tri1_deg6);
+	printf("(PP) Counter tri2_deg6 value = %12ld, time %12ld (%ld)\n", count_tri2_deg6, time_tri2_deg6, time_tri2_deg6/count_tri2_deg6);
+	printf("(PP) Counter tri1_deg7 value = %12ld, time %12ld (%ld)\n", count_tri1_deg7, time_tri1_deg7, time_tri1_deg7/count_tri1_deg7);
+	printf("(PP) Counter tri2_deg7 value = %12ld, time %12ld (%ld)\n", count_tri2_deg7, time_tri2_deg7, time_tri2_deg7/count_tri2_deg7);
+
+
+        printf(" counter1 : %1.3f -  counter2 = %1.3f -  counter3 : %1.3f -  counter4 = %1.3f \n", (100.0 * counter_1) / (double)s_counter, (100.0 * counter_2) / (double)s_counter, (100.0 * counter_3) / (double)s_counter, (100.0 * counter_4) / (double)s_counter);
+
 		printf("(PP) Counter 1 value = %12ld, time %12ld (%ld)\n", counter_1, temps_1, temps_1/counter_1);
 		printf("(PP) Counter 2 value = %12ld, time %12ld (%ld)\n", counter_2, temps_2, temps_2/counter_2);
 		printf("(PP) Counter 3 value = %12ld, time %12ld (%ld)\n", counter_3, temps_3, temps_3/counter_3);
 		printf("(PP) Counter 4 value = %12ld, time %12ld (%ld)\n", counter_4, temps_4, temps_4/counter_4);
+
 #endif
 	}
 
@@ -146,17 +182,25 @@ public:
     
 	T* mProjectionPPd(float v[], int length)
 	{
+
 		if( length == 6 )
+
 		{
 #if OPTIMISATION
+
             // version optimisee de la projection
             __m256 rIn = _mm256_loadu_ps(v);
+
             __m256 rOu = projection_deg6( rIn );
+
             _mm256_storeu_ps(results, rOu);
+
             return results;
 #else
             return mProjectionPPd<6>(v);
+
 #endif
+
         } else if( length == 7 ) {
 #if OPTIMISATION
             __m256 rIn = _mm256_loadu_ps(v);
@@ -176,13 +220,19 @@ public:
             return mProjectionPPd<8>(v);
 #endif
         } else if( length == 9 ) { return mProjectionPPd<9>(v);
-        } else {
+        } else if( length == 14 ) { return mProjectionPPd<14>(v);
+        } else if( length == 15 ) { return mProjectionPPd<15>(v);
+        } 
+	else 
+	{
                 cout<<"ADMM not supported"<<endl;
                 exit ( 0 );
-		}
-		return NULL;
 	}
-    
+
+		return NULL;
+
+	}
+ 
     
     
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -191,7 +241,10 @@ public:
     
 	template <int length=6> T* mProjectionPPd(float llr[])
 	{
-        const auto start = timer();
+#ifdef PERFORMANCE_ANALYSIS
+        const auto start  = timer();
+#endif
+
 //		T zero_tol_offset = 1e-10;
 #if 1
         int AllZero = 0;
@@ -215,8 +268,10 @@ for(int i = 0; i < length; i++)
 			//#pragma unroll
 			//for(int i = 0;i < length; i++)
 			//	results[i] = 0;
-			counter_1 += 1;
+#ifdef PERFORMANCE_ANALYSIS
+            counter_1 += 1;
             temps_1   += (timer() - start);
+#endif
 			//return results;
 			return results_0;
 		}
@@ -228,8 +283,10 @@ for(int i = 0; i < length; i++)
 			//#pragma unroll
 			//for(int i = 0;i < length; i++)
 				//	results[i] = 1;
-			counter_2 += 1;
-            temps_2   += (timer() - start);
+			#ifdef PERFORMANCE_ANALYSIS
+						counter_2 += 1;
+						temps_2   += (timer() - start);
+			#endif
 			//return results;
 			return results_1;
 		}
@@ -317,27 +374,11 @@ for(int i = 0; i < length; i++)
 			#pragma unroll
 			for(int i = 0; i < 8; i++)
 				results[zSorti[i]] = llrClip[i];
-			counter_3 += 1;
-#if 0
-			float toto[8];
-			__m256  a = _mm256_loadu_ps   (llrClip);
-			__m256i b = _mm256_loadu_si256((const __m256i*)zSorti);
-			__m256 c = _mm256_permutevar8x32_ps(a, b);
-			_mm256_storeu_ps   (toto, c);
+			#ifdef PERFORMANCE_ANALYSIS
+					counter_3 += 1;
+					temps_3   += (timer() - start);
+			#endif
 
-			bool ok = true;
-			for(int i=0; i <length; i++) ok = ok && (toto[i] == results[i]);
-			if( ok == false )
-			{
-				show( (float*)llr     );
-				show( (float*)llrClip );
-				show( (int*)  zSorti  );
-				show( (float*)results );
-				show( (float*)toto    );
-				exit( 0 );
-			}
-#endif
-            temps_3   += (timer() - start);
 			return results;
 		}
 
@@ -419,6 +460,14 @@ for(int i = 0; i < length; i++)
         {
             sort8_rank_order_reg_modif(T_in, T_out, zSorti_m, order_out);
         }
+        else if( length == 14 )
+        {
+            sort14_rank_order_reg_modif(T_in, T_out, zSorti_m, order_out);
+	}
+        else if( length == 15 )
+        {
+            sort15_rank_order_reg_modif(T_in, T_out, zSorti_m, order_out);
+	}
         else
         {
             cout << "(EE) mProjectionPPd:: No sort available (yet) for deg=" << length << endl;
@@ -558,8 +607,12 @@ for(int i = 0; i < length; i++)
 			results[zSorti[i]] = vMax;
 		}
 #endif
-		counter_4 += 1;
-        temps_4   += (timer() - start);
+
+
+		#ifdef PERFORMANCE_ANALYSIS
+            counter_4 += 1;
+            temps_4   += (timer() - start);
+		#endif
 		return results;
 	}
 
@@ -571,11 +624,13 @@ for(int i = 0; i < length; i++)
 
     inline __m256 projection_deg6(const __m256 llrS)
     {
+
 #ifdef PERFORMANCE_ANALYSIS
         const auto start  = timer();
 #endif
+
         const auto length = 6;
-        
+
         ///////////// VERSION ACCELEREEE DU CALCUL DES ZEROS ET UN //////////////
         
         const auto zero     = _mm256_setzero_ps();//_mm256_set1_ps( 0.0f );
@@ -615,11 +670,13 @@ for(int i = 0; i < length; i++)
         int   Indices4Tri[8] __attribute__((aligned(64)));
         int   Indices4Avx[8] __attribute__((aligned(64)));
         _mm256_store_ps   (t_llrS, llrS);
-        
-//        IACA_START
-//        Sort4Deg6(llrS, Indices4Tri, Indices4Avx);
-        Sort4Deg6(t_llrS, Indices4Tri, Indices4Avx);
-//        IACA_END
+
+         #ifdef PERFORMANCE_ANALYSIS
+         const auto start_tri1  = timer();
+         Sort4Deg6(t_llrS, Indices4Tri, Indices4Avx);
+         time_tri1_deg6 += timer() - start_tri1;
+         count_tri1_deg6 ++;
+	 #endif
 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////
         //
@@ -703,7 +760,12 @@ for(int i = 0; i < length; i++)
 //        SecondTriDesDonnesDeg6(T_in, T_out, order_out);
 //        show( order_out );
 //#else
-        SecondTriDesDonnesDeg6(T_in, order_out);
+         #ifdef PERFORMANCE_ANALYSIS
+         const auto start_tri2  = timer();
+         SecondTriDesDonnesDeg6(T_in, order_out);
+         time_tri2_deg6 += timer() - start_tri2;
+         count_tri2_deg6 ++;
+         #endif
         const auto permu = _mm256_loadu_si256      ((const __m256i*)order_out);
         const auto dperm = _mm256_permutevar8x32_ps(temp_2, permu);
         _mm256_storeu_ps(T_out, dperm);
@@ -854,6 +916,7 @@ for(int i = 0; i < length; i++)
         counter_4 += 1;
         temps_4   += (timer() - start);
 #endif
+
         return rFinal;
     }
     
@@ -867,7 +930,7 @@ for(int i = 0; i < length; i++)
     {
         const auto length = 7;
         const auto mask7  = 0x7F;
-        
+
         ///////////// VERSION ACCELEREEE DU CALCUL DES ZEROS ET UN //////////////
         
         const auto zero     = _mm256_setzero_ps();
@@ -899,8 +962,14 @@ for(int i = 0; i < length; i++)
         int   Indices4Tri[8] __attribute__((aligned(64)));
         int   Indices4Avx[8] __attribute__((aligned(64)));
         _mm256_store_ps   (t_llrS, llrS);
-        Sort4Deg7         (t_llrS, Indices4Tri, Indices4Avx);                                // <== DEGREEE RELATED CODE
-        
+                             // <== DEGREEE RELATED CODE
+         #ifdef PERFORMANCE_ANALYSIS
+         const auto start_tri1  = timer();
+         Sort4Deg7         (t_llrS, Indices4Tri, Indices4Avx);   
+	 time_tri1_deg7 += timer() - start_tri1;
+         count_tri1_deg7 ++;
+	 #endif
+ 
         ////////////////////////////////////////////////////////////////////////////////////////////////////////////
         //
         // ON CLIP LES DONNEES
@@ -968,9 +1037,15 @@ for(int i = 0; i < length; i++)
         const auto temp_1  = _mm256_add_ps( cllr,   pdiffs  );
         const auto temp_2  = _mm256_xor_ps( pmults, temp_1  );
         _mm256_storeu_ps(T_in, temp_2);
+         #ifdef PERFORMANCE_ANALYSIS
+         const auto start_tri2  = timer();
+         SecondTriDesDonnesDeg7(T_in, order_out); 
+	 time_tri2_deg7 += timer() - start_tri2;
+         count_tri2_deg7 ++;
+	 #endif
 
-        SecondTriDesDonnesDeg7(T_in, order_out);                                // <== DEGREEE RELATED CODE
-        const auto permu = _mm256_loadu_si256      ((const __m256i*)order_out);
+
+	const auto permu = _mm256_loadu_si256      ((const __m256i*)order_out);
         const auto dperm = _mm256_permutevar8x32_ps(temp_2, permu);
         _mm256_storeu_ps(T_out, dperm);
 
@@ -1068,6 +1143,7 @@ for(int i = 0; i < length; i++)
         const auto t_llrs  = _mm256_min_ps  ( s_llrs,   un     );
         const auto permut  = _mm256_loadu_si256((const __m256i*)Indices4Avx);
         const auto rFinal  = _mm256_permutevar8x32_ps(t_llrs, permut);
+
         return rFinal;
     }
     

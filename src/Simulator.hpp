@@ -9,7 +9,8 @@
 #define SIMULATOR_HPP_
 
 #include "Decoder.hpp"
-
+#include "./old/oDecoder.hpp"
+#include <chrono>
 //!  Class for simulation
 /*!
 Run simulations.
@@ -22,10 +23,11 @@ private:
     
     const int max_threads = 8;
     int num_threads = 1;
-	NoisySeq*   mNoisySequence[8];
-	Channel*    mChannel[8];
+	NoisySeq*   mNoisySequence  [8];
+	Channel*    mChannel        [8];
 	DecodedSeq* mDecodedSequence[8];
-	Decoder*    mDecoder[8];
+	Decoder*    mDecoder        [8];
+	oDecoder*   _Decoder        [8];
 
 	string mChannelName;
 	string mDecoderName;
@@ -65,6 +67,7 @@ private:
 	uint32 mTargetExeTime;
 
 	double mTotalExeTime;
+	double mTotalSimTime;
 
 	uint32 nbBitErrors;//imen BER calc
 
@@ -120,6 +123,7 @@ private:
 		mTotalErrors              = 0;
 		mTotalSims                = 0;
 		mTotalExeTime             = 0;
+		mTotalSimTime             = 0;
 		mTotalDecodingTime        = 0;
 		mTotalIterations          = 0;
 		mTotalCorrectIterations   = 0;
@@ -192,7 +196,10 @@ private:
 		    double        bps    = (trame_par_sec * mBlocklength) / 1000.0 / 1000.0;
 //		    double be_par_fe     = mTotalUndetectedErrors;
             double avgIters      = (double)mTotalIterations/(double)(mTotalSims);
-		    printf("SNR = %.2f | BER = %1.3e | FER = %1.3e | BPS = %2.2f | MATRICES = %8ld | FE = %d | ERR = %d | MlErr = %d | Avg#Iter = %1.2f | ", EbN0, tBER, tFER, bps, mTotalSims, (int) mTotalErrors, (int) mTotalUndetectedErrors, (int)mTotalUndetectedErrors, avgIters); ShowTime( temps/1000.f );
+		    printf("SNR = %.2f | BER = %1.3e | FER = %1.3e | BPS = %2.2f | MATRICES = %8ld | FE = %d | ERR = %d | MlErr = %d | Avg#Iter = %1.2f | ", EbN0, tBER, tFER, bps, mTotalSims, (int) mTotalErrors, (int) mTotalUndetectedErrors, (int)mTotalUndetectedErrors, avgIters);
+		    ShowTime( temps/1000.f );
+		    printf(" | ");
+		    ShowTime( (double)mTotalSimTime/1000.f );
 		    printf("\n");
 		    fflush(stdout);
 	}
@@ -257,6 +264,8 @@ private:
                     
                 }
                 ShowTime( temps/1000.f );
+    		    printf(" | ");
+    		    ShowTime( (double)mTotalSimTime/1000.f );
                 if( tick%4 == 0 ) printf("   ");
                 if( tick%4 == 1 ) printf(".  ");
                 if( tick%4 == 2 ) printf(".. ");
@@ -308,7 +317,7 @@ public:
 	*/
 	void SetChannelSeed(int seed){
         for (int qq = 0; qq<num_threads; qq+=1) // BLG
-            mChannel[qq]->SetSeed(seed);
+            mChannel[qq]->SetSeed(seed + qq);
     }
 	//! Set simulation targets
 	/*!
@@ -337,8 +346,11 @@ public:
 	*/
 	void SetDecoder(string decoder){
         mDecoderName = decoder;
-        for (int qq = 0; qq<num_threads; qq+=1) // BLG
+        for (int qq = 0; qq<num_threads; qq+=1)
+        {
             mDecoder[qq]->SetDecoder(mDecoderName);
+            _Decoder[qq]->SetDecoder(mDecoderName);
+        }
     }
 
 	//! Set decoder parameters. Sufficient for ADMM LP.
@@ -351,8 +363,11 @@ public:
 	*/
 	void SetDecoderParameters(int mxIt, double feas,  double p_mu, double p_rho)
 	{
-        for (int qq = 0; qq<num_threads; qq+=1) // BLG
+        for (int qq = 0; qq<num_threads; qq+=1)
+        {
             mDecoder[qq]->SetParameters(mxIt, feas, p_mu, p_rho);
+            _Decoder[qq]->SetParameters(mxIt, feas, p_mu, p_rho);
+        }
 	}
 	//! Set decoder parameters. Sufficient for ADMM L1 and ADMM L2
 	/*!
@@ -365,11 +380,17 @@ public:
 	*/
 	void SetDecoderParameters(int mxIt, double feas,  double p_mu, double p_rho, double alp)
 	{
-        for (int qq = 0; qq<num_threads; qq+=1) // BLG
+        for (int qq = 0; qq<num_threads; qq+=1){
             mDecoder[qq]->SetParameters(mxIt,feas,p_mu,p_rho);
+            _Decoder[qq]->SetParameters(mxIt,feas,p_mu,p_rho);
+        	// BLG
+        }
 
-        for (int qq = 0; qq<num_threads; qq+=1) // BLG
+        for (int qq = 0; qq<num_threads; qq+=1){
+        	// BLG
             mDecoder[qq]->SetPenaltyConstant(alp);
+            _Decoder[qq]->SetPenaltyConstant(alp);
+        }
 	}
 	//! Set decoder parameters. Sufficient for all ADMM algorithms
 	/*!
@@ -398,8 +419,11 @@ public:
 	*/
 	void SetDecoderParameters(int mxIt, double feas,  double p_mu, double p_rho, bool nonsat, double value)
 	{
-        for (int qq = 0; qq<num_threads; qq+=1) // BLG
+        for (int qq = 0; qq<num_threads; qq+=1)
+        {
             mDecoder[qq]->SetParameters(mxIt, feas, p_mu, p_rho); //mDecoder.SetBPSaturation(nonsat, value);
+            _Decoder[qq]->SetParameters(mxIt, feas, p_mu, p_rho); //mDecoder.SetBPSaturation(nonsat, value);
+        }
 	}
 
     //! Set decoder parameters. Setting for normalized LLR for BSC
@@ -413,8 +437,11 @@ public:
 	*/
 	void SetDecoderParameters(int mxIt, double feas,  double p_mu, double p_rho, bool normal)
 	{
-        for (int qq = 0; qq<num_threads; qq+=1) // BLG
+        for (int qq = 0; qq<num_threads; qq+=1)
+        {
             mDecoder[qq]->SetParameters(mxIt, feas, p_mu, p_rho); //mDecoder.SetBSCnormalized(normal);
+            _Decoder[qq]->SetParameters(mxIt, feas, p_mu, p_rho); //mDecoder.SetBSCnormalized(normal);
+        }
 	}
 
     //! Run simulations
@@ -443,8 +470,11 @@ public:
         for (int qq = 0; qq<num_threads; qq+=1) // BLG
             mDecodedSequence[qq] = new DecodedSeq(blocklength);
 
-        for (int qq = 0; qq<num_threads; qq+=1) // BLG
-            mDecoder[qq]         = new Decoder(pcfilename, nchecks, blocklength);
+        for (int qq = 0; qq<num_threads; qq+=1)
+        {
+            mDecoder[qq]         = new  Decoder(pcfilename, nchecks, blocklength);
+            _Decoder[qq]         = new oDecoder(pcfilename, nchecks, blocklength);
+        }
         
         for (int qq = 0; qq<num_threads; qq+=1) // BLG
             mChannel[qq]         = new Channel(blocklength);
@@ -464,8 +494,11 @@ public:
         for (int qq = 0; qq<num_threads; qq+=1) // BLG
             mChannel[qq]->SetChannel(mBlocklength, mChannelName, mChannelParameter);
 		
-        for (int qq = 0; qq<num_threads; qq+=1) // BLG
+        for (int qq = 0; qq<num_threads; qq+=1)
+        {
             mDecoder[qq]->SetChannel(mChannelName);
+            _Decoder[qq]->SetChannel(mChannelName);
+        }
 		
         mInput = new int[mBlocklength];
 		for(int i = 0; i < mBlocklength; i++)
@@ -487,7 +520,10 @@ public:
             delete mDecodedSequence[qq];
         
         for (int qq = 0; qq<num_threads; qq+=1) // BLG
+        {
             delete mDecoder[qq];
+            delete _Decoder[qq];
+        }
         
         for (int qq = 0; qq<num_threads; qq+=1) // BLG
             delete mChannel[qq];
@@ -626,13 +662,15 @@ void Simulator::mUpdateStats(int qq)
 
 
 
-void Simulator::RunSim()
+void Simulator::RunSim( )
 {
 	mTotalExeTime      = 0;
+	mTotalSimTime      = 0;
     mTotalSims         = 0;
     mTotalDecodingTime = 0;
     mTotalIterations   = 0;
 
+    auto start     = chrono::steady_clock::now();
     mClear(); // clear stats
 	while(true)
 	{
@@ -647,14 +685,19 @@ void Simulator::RunSim()
         #pragma omp parallel for num_threads(num_threads)
         for (int qq = 0; qq<num_threads; qq+=1) // BLG
         {
+#if 1 // NEW / OLD DECODER MODE
             for(int p=0; p<100; p++){
                 mChannel[qq]->GenerateOutput(mInput, *mNoisySequence[qq]);
                 double eTime = mDecoder[qq]->Decode(*mNoisySequence[qq], *mDecodedSequence[qq]);
+#else
+            for(int p=0; p<5; p++){
+                mChannel[qq]->GenerateOutput(mInput, *mNoisySequence[qq]);
+                double eTime = _Decoder[qq]->Decode(*mNoisySequence[qq], *mDecodedSequence[qq]);
+#endif
                 t_exec[qq] += eTime;
-//                printf("> exec = %f\n", eTime);
                 #pragma omp critical // section critique: ne peut être executee que par un thread a la fois
                 {
-                    mUpdateStats(qq); // update stats
+                    mUpdateStats(qq);
                 }
             }
         }
@@ -676,6 +719,8 @@ void Simulator::RunSim()
         for (int qq = 0; qq<num_threads; qq+=1) // BLG
 		
         mOutputCommand();
+
+        mTotalSimTime = chrono::duration <double, milli> (chrono::steady_clock::now() - start).count();
 
         if(mTotalErrors >= mTargetErrors && mTargetErrors > 0)
         {

@@ -12,12 +12,15 @@
 #ifndef DECODER_HPP_
 #define DECODER_HPP_
 
+#define PROFILE_ON
+
 #include "MatriceProjection.hpp"
 
 #include <iostream>
 #include <stdlib.h>
 #include <stdio.h>
-
+#include <chrono>
+#include "./intel/IACA.hpp"
 using namespace std;
 
 
@@ -38,6 +41,11 @@ private:
 	double* mProjectionPPd_d6(NODE v[]);
 	double* mProjectionPPd_d7(NODE v[]);
 
+    long long int t_vn = 0;
+    long long int t_cn = 0;
+    long long int t_pj = 0;
+    long long int t_ex = 0;
+
 	// parameters for decoders
 	string mPCMatrixFileName;  /*!< parity check matrix file */
 	int mNChecks, mBlocklength, mPCheckMapSize;
@@ -55,6 +63,7 @@ private:
 
 	float *Lambda;
 	float *zReplica;
+	float *latestProjVector;
 
 	// algorithm parameter
 	double para_end_feas;   /*!< ADMM alg end tolerance, typically 1e-5 */
@@ -81,8 +90,22 @@ private:
 	//Decoders:
 	void ADMMDecoder();
 	void ADMMDecoder_float();
-    void ADMMDecoder_margulis();
-    void ADMMDecoder_576x288();
+
+	//
+	//
+	//
+
+	template <int _mBlocklength = 2640, int _mNChecks = 1320, int _mPCheckMapSize = 7920>
+    void ADMMDecoder_deg_6_3();
+
+	//
+	//
+	//
+
+	void ADMMDecoder_576x288();
+
+	template <int _mBlocklength = 576, int _mNChecks = 288, int _mPCheckMapSize = 1824>
+	void ADMMDecoder_deg_6_7_2_3_6();
     
 	// data
 	float *_LogLikelihoodRatio; /*!< log-likelihood ratio from received vector */
@@ -138,6 +161,13 @@ public:
 // Decoder Class
 Decoder::Decoder(string FileName,int nChecks, int BlockLength) : mp()
 {
+#ifdef PROFILE_ON
+    t_vn = 0;
+    t_cn = 0;
+    t_pj = 0;
+    t_ex = 0;
+#endif
+
 	// Learn and read parity check matrix
 	mPCMatrixFileName = FileName;
 	mNChecks = nChecks;
@@ -158,6 +188,7 @@ Decoder::Decoder(string FileName,int nChecks, int BlockLength) : mp()
         
 	Lambda   = (float*)_mm_malloc(mPCheckMapSize * sizeof(float), 64);
 	zReplica = (float*)_mm_malloc(mPCheckMapSize * sizeof(float), 64);
+	latestProjVector = (float*)_mm_malloc(mPCheckMapSize * sizeof(float), 64);
 
 	t_col              = (unsigned int*)_mm_malloc(mPCheckMapSize * sizeof(unsigned int), 64);
 	int ptr = 0;
@@ -220,6 +251,26 @@ Decoder::Decoder(string FileName,int nChecks, int BlockLength) : mp()
 
 Decoder::~Decoder()
 {
+#ifdef PROFILE_ON
+
+    if( t_ex != 0 ){
+        t_cn /= t_ex;
+        t_vn /= t_ex;
+        t_pj /= t_ex;
+        long long int sum = t_cn + t_vn;
+        double CN = (100.0 * t_cn) / (double)sum;
+        double VN = (100.0 * t_vn) / (double)sum;
+        double PJ = (100.0 * t_pj) / (double)t_cn;
+
+        printf("cy_VN : %ld - cy_CN = %ld (cy_PJ = %ld) - t_ex: %ld \n", t_vn, t_cn, t_pj, t_ex);
+	printf("VN : %1.3f - CN = %1.3f (PJ = %1.3f) \n", VN, CN, PJ);
+	printf("cyVNpernode : %1.3f - cyCNpernode = %1.3f (cyPJpernode = %1.3f) \n", double(t_vn)/double(mBlocklength), double(t_cn)/double(mNChecks), double(t_pj)/double(mNChecks));
+
+    }else{
+    	printf("(WW) PROFILE WAS SWITCHED ON AND NO DATA ARE AVAILABLE !\n");
+    }
+#endif
+
 	_mm_free ( CheckDegree );
 	_mm_free ( VariableDegree );
 	delete [] mPCheckMap;
@@ -233,6 +284,7 @@ Decoder::~Decoder()
 	_mm_free ( t_row1 );
 	_mm_free ( Lambda );
 	_mm_free ( zReplica );
+	_mm_free( latestProjVector );
 }
 
 //Decodersettings
@@ -246,7 +298,7 @@ void Decoder::SetParameters(int mxIt, double feas,  double p_mu, double p_rho)
 void Decoder::SetDecoder(string decoder)
 {
 	mRealDecoderName = decoder;
-        DecoderName = "ADMM";
+        DecoderName  = "ADMM";
 }
 
 
@@ -309,7 +361,7 @@ void Decoder::mLearnParityCheckMatrix()// learn the degree of the parity check m
 		cout << "Unable to open file";
 		exit(0);
 	}
-//	cout <<"mPCheckMapSize= "<< mPCheckMapSize<<endl;
+	cout <<"mPCheckMapSize= "<< mPCheckMapSize<<endl;
 }
 
 
@@ -397,28 +449,41 @@ double Decoder::Decode(NoisySeq &channeloutput, DecodedSeq &decoderesult)
 
 	clock_t tStart = clock();
     auto start     = chrono::steady_clock::now();
-    
+    //IACA_START
     //
     //
     //
     if( (mBlocklength == 2640) && (mNChecks == 1320) ){
-        ADMMDecoder_margulis();
+        ADMMDecoder_deg_6_3<2640, 1320, 7920>( );
+
+    //
+    //
+    //
+//
+    } else if( (mBlocklength == 9216) && (mNChecks == 4608) ){
+        ADMMDecoder_deg_6_3<9216, 4608, 27648>( );
+    } else if( (mBlocklength == 4000) && (mNChecks == 2000) ){
+        ADMMDecoder_deg_6_3<4000, 2000, 12000>( );
 
     //
     //
     //
     } else if( (mBlocklength == 576) && (mNChecks == 288) ){
-        ADMMDecoder_576x288();
-    
-        
+    	//ADMMDecoder_576x288();
+
+    	ADMMDecoder_deg_6_7_2_3_6<576, 288, 1824>( );
+
     } else if( (mBlocklength == 2304) && (mNChecks == 1152) ){
-        ADMMDecoder_576x288();
+    	//ADMMDecoder_576x288();
+    	ADMMDecoder_deg_6_7_2_3_6<2304, 1152, 7296>( );
         
     } else {
         ADMMDecoder_float();
     }
     auto end       = chrono::steady_clock::now();
-    
+
+    //IACA_END
+
 	mExeTime                       = clock() - tStart;
 	decoderesult.ExeTime           = mExeTime;
 	decoderesult.Iteration         = mIteration;
@@ -469,359 +534,398 @@ void show8(int* a)
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+#include "./decoders/decoder_576x288.hpp"
 
+#include "./decoders/decoder_deg_6_3.hpp"
 
-void Decoder::ADMMDecoder_margulis()
-{
-	const auto _mPCheckMapSize = 7920;
-	const auto _mBlocklength   = 2640;
-	const auto _VariableDegree = 3;
-	const auto _mNChecks       = 1320;
-	const auto _CheckDegree    = 6;
-
-//	float feas_tol = para_end_feas;
-	int maxIter    = maxIteration;
-
-//	int numIter = 0;
-	float mu    = para_mu;
-	float rho   = para_rho;
-    const float un_m_rho = 1.0 - rho;
-
-    //////////////////////////////////////////////////////////////////////////////////////
-
-    const __m256 a = _mm256_set1_ps ( 0.0f );
-    const __m256 b = _mm256_set1_ps ( 0.5f );
-	#pragma  unroll
-	for( int j = 0; j < _mPCheckMapSize; j+=8 )
-    {
-		_mm256_store_ps(&Lambda  [j], a);
-        _mm256_store_ps(&zReplica[j], b);
-    }
-
-    //////////////////////////////////////////////////////////////////////////////////////
-
-	for(int i = 0; i < maxIter; i++)
-	{
-		const float _amu_   = alpha/mu;
-		const float _2_amu_ = _amu_+ _amu_;
-		mIteration          = i + 1;
-
-	    //////////////////////////////////////////////////////////////////////////////////////
-
-		const auto t_mu   = _mm256_set1_ps ( mu      );
-		const auto t_amu  = _mm256_set1_ps ( _amu_   );
-		const auto t_2amu = _mm256_set1_ps ( _2_amu_ );
-		const auto un     = _mm256_set1_ps ( 1.0f   );
-		const auto zero   = _mm256_set1_ps ( 0.0f    );
-		const auto t_deg  = _mm256_set1_ps ( _VariableDegree );
-
-
-//        #pragma omp parallel for num_threads(4)
-        for(int j = 0; j < _mBlocklength; j+=8 )
-		{
-            auto ptr = j * _VariableDegree;
-            float M[8]      __attribute__((aligned(64)));
-            #pragma  unroll
-			for(int qq = 0; qq < 8; qq++)
-			{
-				M[qq] = 0.0f;
-				#pragma  unroll
-				for(int k = 0; k < _VariableDegree; k++)
-				{
-					M[qq] += (zReplica[ t_row[ptr] ] + Lambda[ t_row[ptr] ]);
-					ptr   += 1;
-				}
-			}
-			const auto m      = _mm256_loadu_ps( M );
-			const auto llr    = _mm256_loadu_ps( &_LogLikelihoodRatio[j] );
-			const auto t      = _mm256_div_ps(llr, t_mu);
-			const auto t1     = _mm256_sub_ps(m, t);
-			const auto x1     = _mm256_sub_ps(t1    , t_amu  );
-			const auto x2     = _mm256_sub_ps(t_deg , t_2amu );
-			const auto xx     = _mm256_div_ps(x1    , x2     );
-			const auto vMax   = _mm256_min_ps(  xx , un    );
-			const auto vMin   = _mm256_max_ps( vMax , zero);
-			_mm256_storeu_ps(&OutputFromDecoder[j], vMin);
-		}
-
-	    //////////////////////////////////////////////////////////////////////////////////////
-//        int ptr     = 0;
-		//do projection for each check node
-		//
+//template <int _mBlocklength, int _mNChecks, int _mPCheckMapSize>
+//void Decoder::ADMMDecoder_deg_6_3()
+//{
+////	const auto ;
+////	const auto ;
+////	const auto ;
+//	const auto _VariableDegree = 3;
+//	const auto _CheckDegree    = 6;
+//
+////	float feas_tol = para_end_feas;
+//	int maxIter    = maxIteration;
+//
+////	int numIter = 0;
+//	float mu    = para_mu;
+//	float rho   = para_rho;
+//    const float un_m_rho = 1.0 - rho;
+//
+//    //////////////////////////////////////////////////////////////////////////////////////
+//
+//    const __m256 a = _mm256_set1_ps ( 0.0f );
+//    const __m256 b = _mm256_set1_ps ( 0.5f );
+//	#pragma  unroll
+//	for( int j = 0; j < _mPCheckMapSize; j+=8 )
+//    {
+//		_mm256_store_ps(&Lambda  [j],         a);
+//        _mm256_store_ps(&zReplica[j],         b);
+//        _mm256_store_ps(&latestProjVector[j], b);
+//    }
+//    //////////////////////////////////////////////////////////////////////////////////////
+//
+//	for(int i = 0; i < maxIter; i++)
+//	{
+//		const float _amu_   = alpha/mu;
+//		const float _2_amu_ = _amu_+ _amu_;
+//		mIteration          = i + 1;
+//
+//	    //////////////////////////////////////////////////////////////////////////////////////
+//
+//		const auto t_mu   = _mm256_set1_ps ( mu      );
+//		const auto t_amu  = _mm256_set1_ps ( _amu_   );
+//		const auto t_2amu = _mm256_set1_ps ( _2_amu_ );
+//		const auto un     = _mm256_set1_ps ( 1.0f   );
+//		const auto zero   = _mm256_set1_ps ( 0.0f    );
+//		const auto t_deg  = _mm256_set1_ps ( _VariableDegree );
+//
+//#ifdef PROFILE_ON
+//		const auto start = timer();
+//#endif
+//
+//		for(int j = 0; j < _mBlocklength; j+=8 )
+//		{
+//            auto ptr = j * _VariableDegree;
+//            float M[8]      __attribute__((aligned(64)));
+//            #pragma  unroll
+//			for(int qq = 0; qq < 8; qq++)
+//			{
+//				M[qq] = 0.0f;
+//				#pragma  unroll
+//				for(int k = 0; k < _VariableDegree; k++)
+//				{
+//					M[qq] += (zReplica[ t_row[ptr] ] + Lambda[ t_row[ptr] ]);
+//					ptr   += 1;
+//				}
+//			}
+//			const auto m      = _mm256_loadu_ps( M );
+//			const auto llr    = _mm256_loadu_ps( &_LogLikelihoodRatio[j] );
+//			const auto t      = _mm256_div_ps(llr, t_mu);
+//			const auto t1     = _mm256_sub_ps(m, t);
+//			const auto x1     = _mm256_sub_ps(t1    , t_amu  );
+//			const auto x2     = _mm256_sub_ps(t_deg , t_2amu );
+//			const auto xx     = _mm256_div_ps(x1    , x2     );
+//			const auto vMax   = _mm256_min_ps(  xx , un    );
+//			const auto vMin   = _mm256_max_ps( vMax , zero);
+//			_mm256_storeu_ps(&OutputFromDecoder[j], vMin);
+//		}
+//#ifdef PROFILE_ON
+//        t_vn   += (timer() - start);
+//#endif
+//
+//	    //////////////////////////////////////////////////////////////////////////////////////
+////        int ptr     = 0;
+//		//do projection for each check node
+//		//
+////		int CumSumCheckDegree = 0; // cumulative position of currect edge in factor graph
+//        int allVerified = 0;
+//
+//        const auto  dot5      = _mm256_set1_ps(     0.5f );
+//	    const auto  _rho      = _mm256_set1_ps(      rho );
+//		const auto  _un_m_rho = _mm256_set1_ps( un_m_rho );
+//		const auto mask_6     = _mm256_set_epi32(0x00000000, 0x00000000, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF);
+//
+//#ifdef PROFILE_ON
+//		const auto starT = timer();
+//#endif
+//
+//        for(int j = 0; j < _mNChecks; j++)
+//		{
+////            float vector_before_proj[8] __attribute__((aligned(64)));
+//            int CumSumCheckDegree = j * _CheckDegree;
+//
+//            const auto offsets    = _mm256_loadu_si256  ((const __m256i*)&t_col1  [CumSumCheckDegree]);
+//            const auto xpred      = _mm256_mask_i32gather_ps (zero, OutputFromDecoder, offsets, _mm256_castsi256_ps(mask_6), 4);
+//			const auto synd       = _mm256_cmp_ps( xpred, dot5,   _CMP_GT_OS );
+//			int test              = (_mm256_movemask_ps( synd ) & 0x3F);
+//			const auto syndrom    = _mm_popcnt_u32( test );
+//			const auto _Replica   = _mm256_loadu_ps(                &zReplica[CumSumCheckDegree]);
+//			const auto _ambda     = _mm256_loadu_ps(                &Lambda  [CumSumCheckDegree]);
+//			const auto v1         = _mm256_mul_ps  (   xpred,      _rho );
+//			const auto v2         = _mm256_mul_ps  ( _Replica, _un_m_rho );
+//			const auto v3         = _mm256_add_ps  ( v1, v2 );
+//			const auto vect_proj  = _mm256_sub_ps  ( v3, _ambda );
+//
+//
+//            //
+//            // ON REALISE LA PROJECTION !!!
+//            //
+//            allVerified       += ( syndrom & 0x01 );
+//#ifdef PROFILE_ON
+//    		const auto START = timer();
+//#endif
+//			const auto latest    = _mm256_loadu_ps(&latestProjVector[CumSumCheckDegree]);
+//			const auto different = _mm256_sub_ps ( vect_proj, latest );
+//			const auto maskAbsol = _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFFFFFF));
+//			const auto absolute  = _mm256_and_ps ( different, maskAbsol );
+//	        const auto seuilProj = _mm256_set1_ps( 1e-5f );
+//	        const auto despass   = _mm256_cmp_ps( absolute, seuilProj, _CMP_GT_OS );
+//	        int skip = (_mm256_movemask_ps( despass ) & 0x3F) == 0x00; // degree 6
+//
+//	        if( skip == false )
+//	        {
+//	            const auto _ztemp  = mp.projection_deg6( vect_proj );
+////	        	printf("On skippe un calcul !!!\n");
+//	    		const auto _ztemp1 = _mm256_sub_ps(_ztemp,    xpred );
+//	    		const auto _ztemp2 = _mm256_sub_ps(_ztemp, _Replica );
+//	    		const auto _ztemp3 = _mm256_mul_ps(_ztemp1, _rho);
+//	    		const auto _ztemp4 = _mm256_mul_ps(_ztemp2, _un_m_rho);
+//				const auto nLambda = _mm256_add_ps( _ambda,  _ztemp3 );
+//				const auto mLambda = _mm256_add_ps( nLambda, _ztemp4 );
+//	    		_mm256_maskstore_ps(&  Lambda[CumSumCheckDegree], mask_6, mLambda);
+//	    		_mm256_maskstore_ps(&zReplica[CumSumCheckDegree], mask_6,  _ztemp);
+//				_mm256_storeu_ps(&latestProjVector[CumSumCheckDegree], vect_proj);
+//	        }
+//#ifdef PROFILE_ON
+//            t_pj   += (timer() - START);
+//#endif
+//		}
+//
+//#ifdef PROFILE_ON
+//        t_cn   += (timer() - starT);
+//#endif
+//
+//		if(allVerified == 0)
+//		{
+//			mAlgorithmConverge = true;
+//			mValidCodeword     = true;
+//			break;
+//		}
+//	}
+//	t_ex += 1;
+//}
+//
+//
+//
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//deg_6_7_2_3_6
+//void Decoder::ADMMDecoder_576x288()
+//template <int _mBlocklength, int _mNChecks, int _mPCheckMapSize>
+//void Decoder::ADMMDecoder_deg_6_7_2_3_6()
+//{
+//	int maxIter          = maxIteration;
+//    const float mu       = 3.37309f;//para_mu;
+//    const float rho      = 1.9f;    //para_rho;
+//    const float un_m_rho = 1.0 - rho;
+//    float tableau[]      = { 0.0f, 0.0f, 0.00001f, 2.00928f, 0.0f, 0.0f, 4.69438f };
+//    float tableaX[7];
+//
+//    //
+//    // ON PRECALCULE LES CONSTANTES
+//    //
+//    for (int i = 0; i < 7; i++)
+//    {
+//        tableaX[i] = tableau[ i ] / mu;
+//    }
+//
+//    for (int i = 0;i < mPCheckMapSize; i++)
+//	{
+//		Lambda  [i] = 0;
+//		zReplica[i] = 0.5;
+//	}
+//
+//	for(int i = 0; i < maxIter; i++)
+//	{
+//        int ptr    = 0;
+//		mIteration = i + 1;
+//
+//        //
+//		// VN processing kernel
+//		//
+//		for (int j = 0; j < mBlocklength; j++)
+//        {
+//            const int degVn = VariableDegree[j];
+//            float temp = 0;
+//            for(int k = 0; k < degVn; k++)
+//            {
+//            	temp += (zReplica[ t_row[ptr] ] + Lambda[ t_row[ptr] ]);
+//                ptr  +=1;
+//            }
+//            const float _amu_    = tableaX[ degVn ];
+//            const float _2_amu_  = _amu_+ _amu_;
+//            float llr  = _LogLikelihoodRatio[j];
+//			float t    = temp - llr / mu;
+//	        float xx   = (t  -  _amu_)/(degVn - _2_amu_);
+//			float vMax = std::min(xx,   1.0f);
+//			float vMin = std::max(vMax, 0.0f);
+//			OutputFromDecoder[j] = vMin;
+//        }
+//
+//		//
+//		// CN processing kernel
+//		//
 //		int CumSumCheckDegree = 0; // cumulative position of currect edge in factor graph
-        int allVerified = 0;
+//        int allVerified       = 0;
+//		float vector_before_proj[8] __attribute__((aligned(64)));
+//		for(int j = 0; j < mNChecks; j++)
+//		{
+//            if( CheckDegree[j] == 6 ){
+//                int syndrom = 0;
+//                #pragma unroll
+//                for(int k = 0; k < 6; k++) // fill out the vector
+//                {
+//                    const auto ind         = CumSumCheckDegree + k;
+//                    const auto xpred       = OutputFromDecoder[ t_col1[ind] ];
+//                    syndrom               += (xpred - 0.5) > 0.0f;
+//                    vector_before_proj[k]  = rho * xpred + un_m_rho * zReplica[ind] - Lambda[ind];
+//                }
+//                allVerified   += ( syndrom & 0x01 );
+//                _type_ *ztemp  = mp.mProjectionPPd(vector_before_proj, 6);
+//
+//                for(int k = 0; k < 6; k++)
+//                {
+//                    const auto l   = CumSumCheckDegree + k;
+//                    Lambda[l]      = Lambda[l] + (rho * (ztemp[k] - OutputFromDecoder[ t_col1[l] ]) + un_m_rho * (ztemp[k] - zReplica[l]));
+//                }
+//                #pragma unroll
+//                for(int k = 0; k < 6; k++)      { zReplica[CumSumCheckDegree + k] = ztemp[k]; }
+//                CumSumCheckDegree += CheckDegree[j];
+//
+//            }else if( CheckDegree[j] == 7 ){
+//                int syndrom = 0;
+//                #pragma unroll
+//                for(int k = 0; k < 7; k++) // fill out the vector
+//                {
+//                    const auto ind         = CumSumCheckDegree + k;
+//                    const auto xpred       = OutputFromDecoder[ t_col1[ind] ];
+//                    syndrom               += (xpred - 0.5) > 0.0f;
+//                    vector_before_proj[k]  = rho * xpred + un_m_rho * zReplica[ind] - Lambda[ind];
+//                }
+//                allVerified   += ( syndrom & 0x01 );
+//                _type_ *ztemp  = mp.mProjectionPPd(vector_before_proj, 7);
+//
+//                for(int k = 0; k < CheckDegree[j]; k++)
+//                {
+//                    const auto l   = CumSumCheckDegree + k;
+//                    Lambda[l]      = Lambda[l] + (rho * (ztemp[k] - OutputFromDecoder[ t_col1[l] ]) + un_m_rho * (ztemp[k] - zReplica[l]));
+//                }
+//                #pragma unroll
+//                for(int k = 0; k < 7; k++) { zReplica[CumSumCheckDegree + k] = ztemp[k]; }
+//                CumSumCheckDegree += CheckDegree[j];
+//
+//            }else{
+//                exit( 0 );
+//            }
+//
+//
+//        }
+//
+//		if(allVerified == 0)
+//		{
+//			mAlgorithmConverge = true;
+//			mValidCodeword     = true;
+//			break;
+//		}
+//	}
+//}
+//
+//
+//
 
-        const auto  dot5      = _mm256_set1_ps(     0.5f );
-	    const auto  _rho      = _mm256_set1_ps(      rho );
-		const auto  _un_m_rho = _mm256_set1_ps( un_m_rho );
-		const auto mask_6     = _mm256_set_epi32(0x00000000, 0x00000000, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF);
-
-
-        for(int j = 0; j < _mNChecks; j++)
-		{
-//            float vector_before_proj[8] __attribute__((aligned(64)));
-            int CumSumCheckDegree = j * _CheckDegree;
-
-			const auto offsets    = _mm256_loadu_si256  ((const __m256i*)&t_col1  [CumSumCheckDegree]);
-            const auto xpred      = _mm256_mask_i32gather_ps (zero, OutputFromDecoder, offsets, _mm256_castsi256_ps(mask_6), 4);
-			const auto synd       = _mm256_cmp_ps( xpred, dot5,   _CMP_GT_OS );
-			int test              = (_mm256_movemask_ps( synd ) & 0x3F);
-			const auto syndrom    = _mm_popcnt_u32( test );
-			const auto _Replica   = _mm256_loadu_ps     (                &zReplica[CumSumCheckDegree]);
-			const auto _ambda     = _mm256_loadu_ps     (                &Lambda  [CumSumCheckDegree]);
-			const auto v1         = _mm256_mul_ps (   xpred,      _rho );
-			const auto v2         = _mm256_mul_ps ( _Replica, _un_m_rho );
-			const auto v3         = _mm256_add_ps ( v1, v2 );
-			const auto vect_proj  = _mm256_sub_ps ( v3, _ambda );
-//            _mm256_storeu_ps(vector_before_proj, vect_proj);
-
-            //
-            // ON REALISE LA PROJECTION !!!
-            //
-            allVerified   += ( syndrom & 0x01 );
-            const auto _ztemp  = mp.projection_deg6( vect_proj );
-            
-    		const auto _ztemp1 = _mm256_sub_ps(_ztemp,    xpred );
-    		const auto _ztemp2 = _mm256_sub_ps(_ztemp, _Replica );
-    		const auto _ztemp3 = _mm256_mul_ps(_ztemp1, _rho);
-    		const auto _ztemp4 = _mm256_mul_ps(_ztemp2, _un_m_rho);
-			const auto nLambda = _mm256_add_ps( _ambda,  _ztemp3 );
-			const auto mLambda = _mm256_add_ps( nLambda, _ztemp4 );
-    		_mm256_maskstore_ps(&  Lambda[CumSumCheckDegree], mask_6, mLambda);
-    		_mm256_maskstore_ps(&zReplica[CumSumCheckDegree], mask_6,  _ztemp);
-		}
-
-		if(allVerified == 0)
-		{
-			mAlgorithmConverge = true;
-			mValidCodeword     = true;
-			break;
-		}
-	}
-}
-
-
-
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-void Decoder::ADMMDecoder_576x288()
-{
-	int maxIter          = maxIteration;
-    const float mu       = 3.37309f;//para_mu;
-    const float rho      = 1.9f;    //para_rho;
-    const float un_m_rho = 1.0 - rho;
-    float tableau[]      = { 0.0f, 0.0f, 0.00001f, 2.00928f, 0.0f, 0.0f, 4.69438f };
-    float tableaX[7];
-
-    //
-    // ON PRECALCULE LES CONSTANTES
-    //
-    for (int i = 0; i < 7; i++)
-    {
-        tableaX[i] = tableau[ i ] / mu;
-    }
-    
-    for (int i = 0;i < mPCheckMapSize; i++)
-	{
-		Lambda  [i] = 0;
-		zReplica[i] = 0.5;
-	}
-
-	for(int i = 0; i < maxIter; i++)
-	{
-        int ptr    = 0;
-		mIteration = i + 1;
-
-        //
-		// VN processing kernel
-		//
-		for (int j = 0; j < mBlocklength; j++)
-        {
-            const int degVn = VariableDegree[j];
-            float temp = 0;
-            for(int k = 0; k < degVn; k++)
-            {
-            	temp += (zReplica[ t_row[ptr] ] + Lambda[ t_row[ptr] ]);
-                ptr  +=1;
-            }
-            const float _amu_    = tableaX[ degVn ];
-            const float _2_amu_  = _amu_+ _amu_;
-            float llr  = _LogLikelihoodRatio[j];
-			float t    = temp - llr / mu;
-	        float xx   = (t  -  _amu_)/(degVn - _2_amu_);
-			float vMax = std::min(xx,   1.0f);
-			float vMin = std::max(vMax, 0.0f);
-			OutputFromDecoder[j] = vMin;
-        }
-
-		//
-		// CN processing kernel
-		//
-		int CumSumCheckDegree = 0; // cumulative position of currect edge in factor graph
-        int allVerified       = 0;
-		float vector_before_proj[8] __attribute__((aligned(64)));
-		for(int j = 0; j < mNChecks; j++)
-		{
-            if( CheckDegree[j] == 6 ){
-                int syndrom = 0;
-                #pragma unroll
-                for(int k = 0; k < 6; k++) // fill out the vector
-                {
-                    const auto ind         = CumSumCheckDegree + k;
-                    const auto xpred       = OutputFromDecoder[ t_col1[ind] ];
-                    syndrom               += (xpred - 0.5) > 0.0f;
-                    vector_before_proj[k]  = rho * xpred + un_m_rho * zReplica[ind] - Lambda[ind];
-                }
-                allVerified   += ( syndrom & 0x01 );
-                _type_ *ztemp  = mp.mProjectionPPd(vector_before_proj, 6);
-                
-                for(int k = 0; k < 6; k++)
-                {
-                    const auto l   = CumSumCheckDegree + k;
-                    Lambda[l]      = Lambda[l] + (rho * (ztemp[k] - OutputFromDecoder[ t_col1[l] ]) + un_m_rho * (ztemp[k] - zReplica[l]));
-                }
-                #pragma unroll
-                for(int k = 0; k < 6; k++)      { zReplica[CumSumCheckDegree + k] = ztemp[k]; }
-                CumSumCheckDegree += CheckDegree[j];
-
-            }else if( CheckDegree[j] == 7 ){
-                int syndrom = 0;
-                #pragma unroll
-                for(int k = 0; k < 7; k++) // fill out the vector
-                {
-                    const auto ind         = CumSumCheckDegree + k;
-                    const auto xpred       = OutputFromDecoder[ t_col1[ind] ];
-                    syndrom               += (xpred - 0.5) > 0.0f;
-                    vector_before_proj[k]  = rho * xpred + un_m_rho * zReplica[ind] - Lambda[ind];
-                }
-                allVerified   += ( syndrom & 0x01 );
-                _type_ *ztemp  = mp.mProjectionPPd(vector_before_proj, 7);
-                
-                for(int k = 0; k < CheckDegree[j]; k++)
-                {
-                    const auto l   = CumSumCheckDegree + k;
-                    Lambda[l]      = Lambda[l] + (rho * (ztemp[k] - OutputFromDecoder[ t_col1[l] ]) + un_m_rho * (ztemp[k] - zReplica[l]));
-                }
-                #pragma unroll
-                for(int k = 0; k < 7; k++) { zReplica[CumSumCheckDegree + k] = ztemp[k]; }
-                CumSumCheckDegree += CheckDegree[j];
-
-            }else{
-                exit( 0 );
-            }
-            
-
-        }
-
-		if(allVerified == 0)
-		{
-			mAlgorithmConverge = true;
-			mValidCodeword     = true;
-			break;
-		}
-	}
-}
-
-
+#include "decoders/decoder_deg_6_7_2_3_6.hpp"
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#define CHINOIS
+#include "decoders/decoder_float.hpp"
 
-void Decoder::ADMMDecoder_float()
-{
-    int maxIter          = maxIteration;
-    const float mu       = para_mu;
-    const float rho      = para_rho;
-    const float un_m_rho = 1.0 - rho;
-    const float _amu_    = alpha/mu;
-    const float _2_amu_  = _amu_+ _amu_;
-
-    for (int i = 0;i < mPCheckMapSize; i++)
-    {
-        Lambda  [i] = 0;
-        zReplica[i] = 0.5;
-    }
-    
-    for(int i = 0; i < maxIter; i++)
-    {
-        int ptr    = 0;
-        mIteration = i + 1;
-        //
-        // VN processing kernel
-        //
-        for (int j = 0; j < mBlocklength; j++)
-        {
-            float temp = 0;
-            for(int k = 0; k < VariableDegree[j]; k++)
-            {
-                temp += (zReplica[ t_row[ptr] ] + Lambda[ t_row[ptr] ]);
-                ptr  +=1;
-            }
-
-            float llr  = _LogLikelihoodRatio[j];
-            float t    = temp - llr / mu;
-            float deg  = (float)VariableDegree[j];
-            float xx   = (t  -  _amu_)/(deg - _2_amu_);
-            float vMax = std::min(xx,   1.0f);
-            float vMin = std::max(vMax, 0.0f);
-            OutputFromDecoder[j] = vMin;
-        }
-        
-        
-        
-        //
-        // CN processing kernel
-        //
-        int CumSumCheckDegree = 0; // cumulative position of currect edge in factor graph
-        int allVerified       = 0;
-        float vector_before_proj[32] __attribute__((aligned(64)));
-        for(int j = 0; j < mNChecks; j++)
-        {
-            int syndrom = 0;
-#pragma unroll
-            for(int k = 0; k < CheckDegree[j]; k++) // fill out the vector
-            {
-                const auto ind         = CumSumCheckDegree + k;
-                
-                //
-                // CALCUL TON VN...
-                //
-                
-                const auto xpred       = OutputFromDecoder[ t_col1[ind] ];
-                syndrom               += (xpred - 0.5) > 0.0f;
-                vector_before_proj[k]  = rho * xpred + un_m_rho * zReplica[ind] - Lambda[ind];
-            }
-            
-            allVerified += ( syndrom & 0x01 );
-            _type_ *ztemp  = mp.mProjectionPPd(vector_before_proj, CheckDegree[j]);
-            
-            for(int k = 0; k < CheckDegree[j]; k++)
-            {
-                const auto l   = CumSumCheckDegree + k;
-                Lambda[l]      = Lambda[l] + (rho * (ztemp[k] - OutputFromDecoder[ t_col1[l] ]) + un_m_rho * (ztemp[k] - zReplica[l]));
-            }
-            
-#pragma unroll
-            for(int k = 0; k < CheckDegree[j]; k++)
-            {
-                zReplica[CumSumCheckDegree + k] = ztemp[k];
-            }
-            CumSumCheckDegree += CheckDegree[j];
-            
-            //
-            // MISE A JOUR DE VN
-            //
-        }
-        
-        if(allVerified == 0)
-        {
-            mAlgorithmConverge = true;
-            mValidCodeword     = true;
-            break;
-        }
-    }
-}
+//void Decoder::ADMMDecoder_float()
+//{
+//    int maxIter          = maxIteration;
+//    const float mu       = para_mu;
+//    const float rho      = para_rho;
+//    const float un_m_rho = 1.0 - rho;
+//    const float _amu_    = alpha/mu;
+//    const float _2_amu_  = _amu_+ _amu_;
+//
+//    for (int i = 0;i < mPCheckMapSize; i++)
+//    {
+//        Lambda  [i] = 0;
+//        zReplica[i] = 0.5;
+//    }
+//
+//    for(int i = 0; i < maxIter; i++)
+//    {
+//        int ptr    = 0;
+//        mIteration = i + 1;
+//        //
+//        // VN processing kernel
+//        //
+//        for (int j = 0; j < mBlocklength; j++)
+//        {
+//            float temp = 0;
+//            for(int k = 0; k < VariableDegree[j]; k++)
+//            {
+//                temp += (zReplica[ t_row[ptr] ] + Lambda[ t_row[ptr] ]);
+//                ptr  +=1;
+//            }
+//
+//            float llr  = _LogLikelihoodRatio[j];
+//            float t    = temp - llr / mu;
+//            float deg  = (float)VariableDegree[j];
+//            float xx   = (t  -  _amu_)/(deg - _2_amu_);
+//            float vMax = std::min(xx,   1.0f);
+//            float vMin = std::max(vMax, 0.0f);
+//            OutputFromDecoder[j] = vMin;
+//        }
+//
+//
+//
+//        //
+//        // CN processing kernel
+//        //
+//        int CumSumCheckDegree = 0; // cumulative position of currect edge in factor graph
+//        int allVerified       = 0;
+//        float vector_before_proj[32] __attribute__((aligned(64)));
+//        for(int j = 0; j < mNChecks; j++)
+//        {
+//            int syndrom = 0;
+//#pragma unroll
+//            for(int k = 0; k < CheckDegree[j]; k++) // fill out the vector
+//            {
+//                const auto ind         = CumSumCheckDegree + k;
+//
+//                //
+//                // CALCUL TON VN...
+//                //
+//
+//                const auto xpred       = OutputFromDecoder[ t_col1[ind] ];
+//                syndrom               += (xpred - 0.5) > 0.0f;
+//                vector_before_proj[k]  = rho * xpred + un_m_rho * zReplica[ind] - Lambda[ind];
+//            }
+//
+//            allVerified += ( syndrom & 0x01 );
+//            _type_ *ztemp  = mp.mProjectionPPd(vector_before_proj, CheckDegree[j]);
+//
+//            for(int k = 0; k < CheckDegree[j]; k++)
+//            {
+//                const auto l   = CumSumCheckDegree + k;
+//                Lambda[l]      = Lambda[l] + (rho * (ztemp[k] - OutputFromDecoder[ t_col1[l] ]) + un_m_rho * (ztemp[k] - zReplica[l]));
+//            }
+//
+//#pragma unroll
+//            for(int k = 0; k < CheckDegree[j]; k++)
+//            {
+//                zReplica[CumSumCheckDegree + k] = ztemp[k];
+//            }
+//            CumSumCheckDegree += CheckDegree[j];
+//
+//            //
+//            // MISE A JOUR DE VN
+//            //
+//        }
+//
+//        if(allVerified == 0)
+//        {
+//            mAlgorithmConverge = true;
+//            mValidCodeword     = true;
+//            break;
+//        }
+//    }
+//}
 
 
 

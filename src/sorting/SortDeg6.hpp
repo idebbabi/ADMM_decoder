@@ -65,6 +65,7 @@ void sort6_rank_order_reg_modif(double illr[], double rllr[], int ipos[], int rp
 inline void Sort4Deg6(float llr[], int ipos[])
 {
 	//register float x0,x1,x2,x3,x4,x5;
+
 	const auto x0 = llr[0];
   const auto x1 = llr[1];
   const auto x2 = llr[2];
@@ -79,6 +80,7 @@ inline void Sort4Deg6(float llr[], int ipos[])
   const int  o5 = 15-(o0+o1+o2+o3+o4);
   llr[o0] = x0; llr[o1]=x1; llr[o2]=x2; llr[o3]=x3; llr[o4]=x4; llr[o5]=x5;
   ipos[0] = o0; ipos[1]=o1; ipos[2]=o2; ipos[3]=o3; ipos[4]=o4; ipos[5]=o5; ipos[6]=6; ipos[7]=7;
+
 }
 
 
