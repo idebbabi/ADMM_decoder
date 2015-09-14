@@ -41,10 +41,13 @@ private:
 	double* mProjectionPPd_d6(NODE v[]);
 	double* mProjectionPPd_d7(NODE v[]);
 
-    long long int t_vn = 0;
-    long long int t_cn = 0;
-    long long int t_pj = 0;
-    long long int t_ex = 0;
+	long long int t_vn = 0;
+	long long int t_cn = 0;
+	long long int t_pj = 0;
+	long long int t_ex = 0;
+	long long int time_frame = 0;
+
+
 
 	// parameters for decoders
 	string mPCMatrixFileName;  /*!< parity check matrix file */
@@ -96,7 +99,7 @@ private:
 	//
 
 	template <int _mBlocklength = 2640, int _mNChecks = 1320, int _mPCheckMapSize = 7920>
-    void ADMMDecoder_deg_6_3();
+        void ADMMDecoder_deg_6_3();
 
 	//
 	//
@@ -166,6 +169,7 @@ Decoder::Decoder(string FileName,int nChecks, int BlockLength) : mp()
     t_cn = 0;
     t_pj = 0;
     t_ex = 0;
+    time_frame = 0;
 #endif
 
 	// Learn and read parity check matrix
@@ -261,6 +265,8 @@ Decoder::~Decoder()
         double CN = (100.0 * t_cn) / (double)sum;
         double VN = (100.0 * t_vn) / (double)sum;
         double PJ = (100.0 * t_pj) / (double)t_cn;
+
+ 	printf("average cycles to decode a frame: %1.3f \n", (double)time_frame/mTotalSims);
 
         printf("cy_VN : %ld - cy_CN = %ld (cy_PJ = %ld) - t_ex: %ld \n", t_vn, t_cn, t_pj, t_ex);
 	printf("VN : %1.3f - CN = %1.3f (PJ = %1.3f) \n", VN, CN, PJ);
@@ -449,41 +455,22 @@ double Decoder::Decode(NoisySeq &channeloutput, DecodedSeq &decoderesult)
 
 	clock_t tStart = clock();
     auto start     = chrono::steady_clock::now();
-    //IACA_START
-    //
-    //
-    //
     if( (mBlocklength == 2640) && (mNChecks == 1320) ){
         ADMMDecoder_deg_6_3<2640, 1320, 7920>( );
-
-    //
-    //
-    //
-//
     } else if( (mBlocklength == 9216) && (mNChecks == 4608) ){
         ADMMDecoder_deg_6_3<9216, 4608, 27648>( );
     } else if( (mBlocklength == 4000) && (mNChecks == 2000) ){
         ADMMDecoder_deg_6_3<4000, 2000, 12000>( );
-
-    //
-    //
-    //
     } else if( (mBlocklength == 576) && (mNChecks == 288) ){
     	//ADMMDecoder_576x288();
-
     	ADMMDecoder_deg_6_7_2_3_6<576, 288, 1824>( );
-
     } else if( (mBlocklength == 2304) && (mNChecks == 1152) ){
     	//ADMMDecoder_576x288();
     	ADMMDecoder_deg_6_7_2_3_6<2304, 1152, 7296>( );
-        
     } else {
         ADMMDecoder_float();
     }
     auto end       = chrono::steady_clock::now();
-
-    //IACA_END
-
 	mExeTime                       = clock() - tStart;
 	decoderesult.ExeTime           = mExeTime;
 	decoderesult.Iteration         = mIteration;
