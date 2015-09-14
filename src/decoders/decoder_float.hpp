@@ -19,11 +19,11 @@ void Decoder::ADMMDecoder_float()
     } 
     else if((mBlocklength == 1944) && (mNChecks == 972) )//dv 2,3,6,11
     {
-	mu          = 3.73378439f;//penalty
-        tableau[2]  = 0.00001000f;
-	tableau[3]  = 1.73000336f;
-	tableau[4]  = 1.19197333f; 
-	tableau[11] = 7.19659328f;
+	mu          = 3.43369433f;//penalty
+        tableau[2]  = 0.8f;
+	tableau[3]  = 0.8f;
+	tableau[6]  = 0.8f;
+	tableau[11] = 0.8f;
     }
    else 
     {

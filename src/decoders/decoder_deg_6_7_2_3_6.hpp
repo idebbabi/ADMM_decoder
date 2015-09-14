@@ -65,10 +65,6 @@ void Decoder::ADMMDecoder_deg_6_7_2_3_6()
     const __m256 b     = _mm256_set1_ps ( 0.5f );
 
     //////////////////////////////////////////////////////////////////////////////////////
-    	#ifdef PROFILE_ON
-		const auto start_frame = timer();
-	#endif
-
 	#pragma  unroll
 	for( int j = 0; j < _mPCheckMapSize; j+=8 )
     {
@@ -372,9 +368,12 @@ void Decoder::ADMMDecoder_deg_6_7_2_3_6()
 		}
 	}
 
-    	#ifdef PROFILE_ON
-		time_frame += timer() - start_frame;
-	#endif
+	//
+	// MEASURE OF THE NUMBER OF EXECUTION
+	//
+//	#ifdef PROFILE_ON
+//		t_ex += 1;
+//	#endif
 
 }
 
